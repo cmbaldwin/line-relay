@@ -1,0 +1,4 @@
+mcp<2
+pyobjc-framework-ApplicationServices
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
