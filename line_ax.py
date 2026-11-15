@@ -1,5 +1,5 @@
 """LINE macOS UI automation: Accessibility API first, keyboard via System Events, screenshots for verification."""
-import hashlib, os, subprocess, time
+import hashlib, os, re, subprocess, time
 from ApplicationServices import (AXUIElementCreateApplication, AXUIElementCopyAttributeValue,
                                  AXUIElementSetAttributeValue, AXUIElementPerformAction)
 from AppKit import NSWorkspace
@@ -104,30 +104,46 @@ class Line:
     def chat_id(name):
         return "c_" + hashlib.sha1(name.encode()).hexdigest()[:10]
 
+    DATE = re.compile(r", ((?:[A-Z][a-z]+ \d{1,2}(?:, \d{4})?)|\d{1,2}:\d{2}|Yesterday|Today|[A-Z][a-z]{2,8}day)$")
+
     def _rows(self):
+        """(title, element, name, preview, date) for chat rows only; stops at the 'Messages' hit section."""
         out = []
         for r in g(self.chat_list(), "AXChildren") or []:
             for b in g(r, "AXChildren") or []:
-                t = g(b, "AXTitle")
-                if t:
-                    parts = t.rsplit(", ", 2)  # "<name>, <preview>, <date>" (name/preview may contain commas)
-                    out.append((t, b, parts))
+                t = g(b, "AXTitle") or g(b, "AXValue")
+                if not t or not isinstance(t, str):
+                    continue
+                if t.endswith(", Close list"):
+                    if t.startswith("Messages,"):
+                        return out  # message-content hits are not chats
+                    continue
+                m = self.DATE.search(t)
+                date, rest = (m.group(1), t[:m.start()]) if m else ("", t)
+                name, _, preview = rest.partition(", ")
+                if re.fullmatch(r"\d+ people", preview.split(", ")[0]):
+                    preview = preview.partition(", ")[2]  # group: ', N people' is not part of the name
+                out.append((t, b, name, preview, date))
         return out
 
     def search(self, query):
         f = self.search_field()
         AXUIElementSetAttributeValue(f, "AXFocused", True)
         AXUIElementSetAttributeValue(f, "AXValue", query)
-        time.sleep(1.2)
-        res = [{"chat": p[0] if len(p) == 3 else t, "preview": p[1] if len(p) == 3 else "", "date": p[-1], "_el": b}
-               for t, b, p in self._rows()]
-        return res
+        prev, rows = None, []
+        for _ in range(10):  # results arrive asynchronously: wait until stable
+            time.sleep(0.5)
+            rows = self._rows()
+            if rows and [r[0] for r in rows] == prev:
+                break
+            prev = [r[0] for r in rows]
+        return [{"chat": n, "preview": p, "date": d, "_el": b} for t, b, n, p, d in rows]
 
     def clear_search(self):
         AXUIElementSetAttributeValue(self.search_field(), "AXValue", "")
 
     def open_chat(self, name):
-        hits = [h for h in self.search(name) if h["chat"] == name or h["chat"].startswith(name + ",")]
+        hits = [h for h in self.search(name) if h["chat"] == name]
         if len(hits) != 1:
             self.clear_search()
             raise LineError(f"expected exactly one chat named {name!r}, found {len(hits)}")
