@@ -55,6 +55,9 @@ def find_chat(query: str) -> list | str:
                 res = l.search(query)
                 out = [{"id": Line.chat_id(r["chat"]), "chat": r["chat"], "preview": r["preview"], "date": r["date"]} for r in res]
                 l.clear_search()
+                cur = l.focused_chat()  # the open chat's row is opaque to AX in search results
+                if cur and query.lower() in cur.lower() and all(o["chat"] != cur for o in out):
+                    out.insert(0, {"id": Line.chat_id(cur), "chat": cur, "preview": "(currently open)", "date": ""})
                 return out
         except LineError as e:
             return fail(e)

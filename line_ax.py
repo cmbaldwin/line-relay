@@ -129,13 +129,19 @@ class Line:
     def search(self, query):
         f = self.search_field()
         AXUIElementSetAttributeValue(f, "AXFocused", True)
+        AXUIElementSetAttributeValue(f, "AXValue", "")
+        time.sleep(0.4)
         AXUIElementSetAttributeValue(f, "AXValue", query)
         prev, rows = None, []
-        for _ in range(10):  # results arrive asynchronously: wait until stable
+        for _ in range(14):  # results arrive asynchronously: wait until stable
             time.sleep(0.5)
             rows = self._rows()
             if rows and [r[0] for r in rows] == prev:
                 break
+            if _ == 6 and not rows:  # nudge: re-enter the query once
+                AXUIElementSetAttributeValue(f, "AXValue", "")
+                time.sleep(0.3)
+                AXUIElementSetAttributeValue(f, "AXValue", query)
             prev = [r[0] for r in rows]
         return [{"chat": n, "preview": p, "date": d, "_el": b} for t, b, n, p, d in rows]
 
@@ -143,6 +149,8 @@ class Line:
         AXUIElementSetAttributeValue(self.search_field(), "AXValue", "")
 
     def open_chat(self, name):
+        if self.focused_chat() == name:  # the selected row is opaque in AX during search; already there anyway
+            return
         hits = [h for h in self.search(name) if h["chat"] == name]
         if len(hits) != 1:
             self.clear_search()
